@@ -1,0 +1,443 @@
+
+
+#include "Wire.h"
+#include <SoftwareSerial.h>
+
+SoftwareSerial serial1(10, 11); // RX, TX
+
+// Register locations
+#define SLAVEADDR 0x0D
+#define ADDRPTR 0xB0
+#define STARTFREQ_R1 0x82
+#define STARTFREQ_R2 0x83
+#define STARTFREQ_R3 0x84
+#define FREGINCRE_R1 0x85
+#define FREGINCRE_R2 0x86
+#define FREGINCRE_R3 0x87
+#define NUMINCRE_R1 0x88
+#define NUMINCRE_R2 0x89
+#define NUMSCYCLES_R1 0x8A
+#define NUMSCYCLES_R2 0x8B
+#define REDATA_R1 0x94
+#define REDATA_R2 0x95
+#define IMGDATA_R1 0x96
+#define IMGDATA_R2 0x97
+#define CTRLREG 0x80
+#define CTRLREG2 0x81
+#define STATUSREG 0x8F
+
+#define TEMP_R1 0x92
+#define TEMP_R2 0x93
+
+const float MCLK = 16.776 * pow(10, 6); // AD5933 Internal Clock Speed 16.776 MHz
+const float startfreq = 1 * pow(10, 3); // Frequency Start
+const float increfreq = 1 * pow(10, 3); // Frequency Increment
+const int increnum = 99; // Number of increments
+const double gain_factor_50khz  = 0.0894676 ; // 0.0967, 0.0894676
+// Impedance values
+double impedance_50khz;
+double impedance_40khz, impedance_5khz;
+double impedance;
+
+void writeData(int addr, int data);
+void sendFloatBluetooth(float number);
+//void sendStringBluetooth(String str_number);
+byte getFrequency(float freq, int n);
+int readData(int addr);
+int runSweep();
+String state;
+long Height;
+int  Weight, Age, Gender;
+float predictedtbw, tbw, ecw, icw;
+
+typedef enum
+{
+  WAITING_START = 0,
+  READING_USERDATA,
+  MEASURING,
+  SENDING_RESULTS
+} STATES;
+
+STATES actual_state;
+String user_data[4]; // [0] = height | [1] = weight  | [2] = age | [3] = gender
+int user_data_index;
+void setup() {
+  Wire.begin();
+  Serial.begin(9600);
+  pinMode(5,OUTPUT);
+  pinMode(6,OUTPUT);
+  pinMode(7,OUTPUT);
+
+
+  writeData(CTRLREG, 0x0); // Clear Control Register
+  writeData(CTRLREG2, 0x10); // Reset / Internal clock
+
+  
+void programReg() {
+  // Set Range 1, PGA gain 1
+  writeData(CTRLREG, 0x01);
+
+  // Set settling cycles
+  writeData(NUMSCYCLES_R1, 0x07);
+  writeData(NUMSCYCLES_R2, 0xFF);
+
+  // Start frequency of 50 kHz
+  writeData(STARTFREQ_R1, getFrequency(startfreq, 1));
+  writeData(STARTFREQ_R2, getFrequency(startfreq, 2));
+  writeData(STARTFREQ_R3, getFrequency(startfreq, 3));
+
+  // Increment by 1 kHz
+  writeData(FREGINCRE_R1, getFrequency(increfreq, 1));
+  writeData(FREGINCRE_R2, getFrequency(increfreq, 2));
+  writeData(FREGINCRE_R3, getFrequency(increfreq, 3));
+
+  // Points in frequency sweep (100), max 511
+  writeData(NUMINCRE_R1, (increnum & 0x001F00) >> 0x08);
+  writeData(NUMINCRE_R2, (increnum & 0x0000FF));
+}
+
+
+}
+
+void loop() {
+  char receivedChar;
+
+  switch (actual_state) {
+    case WAITING_START:
+      if (Serial.available()) {
+        receivedChar = Serial.read();
+        Serial.println(receivedChar);
+
+        if (receivedChar == 'S') {
+          for (int i = 0; i < 4; ++i) {
+            user_data[i] = "";
+          }
+
+          user_data_index = 0;
+          actual_state = READING_USERDATA;
+        }
+      }
+
+      break;
+
+    case READING_USERDATA:
+      if (Serial.available()) {
+        receivedChar = Serial.read();
+        Serial.println(receivedChar);
+
+        if (user_data_index < 4) {
+          if (receivedChar != ',') {
+            user_data[user_data_index] += receivedChar;
+          } else if (receivedChar == ',') {
+            user_data_index++;
+          }
+        } else {
+          if (receivedChar == 'E') {
+            actual_state = MEASURING;
+          }
+        }
+      }
+
+      break;
+
+    case MEASURING:
+      Serial.println("measuring");
+      short re;
+  short img;
+  float freq;
+  double mag, magnitude[11], total, avgmag;
+  int i = 0;
+
+  impedance_50khz = 0;
+  impedance_40khz = 0;
+  impedance_5khz = 0;
+  impedance = 0;
+
+  
+void programReg() {
+  // Set Range 1, PGA gain 1
+  writeData(CTRLREG, 0x01);
+
+  // Set settling cycles
+  writeData(NUMSCYCLES_R1, 0x07);
+  writeData(NUMSCYCLES_R2, 0xFF);
+
+  // Start frequency of 50 kHz
+  writeData(STARTFREQ_R1, getFrequency(startfreq, 1));
+  writeData(STARTFREQ_R2, getFrequency(startfreq, 2));
+  writeData(STARTFREQ_R3, getFrequency(startfreq, 3));
+
+  // Increment by 1 kHz
+  writeData(FREGINCRE_R1, getFrequency(increfreq, 1));
+  writeData(FREGINCRE_R2, getFrequency(increfreq, 2));
+  writeData(FREGINCRE_R3, getFrequency(increfreq, 3));
+
+  // Points in frequency sweep (100), max 511
+  writeData(NUMINCRE_R1, (increnum & 0x001F00) >> 0x08);
+  writeData(NUMINCRE_R2, (increnum & 0x0000FF));
+}
+
+
+  // 1. Standby '10110000' Mask D8-10 of avoid tampering with gains
+  writeData(CTRLREG, (readData(CTRLREG) & 0x07) | 0xB0);
+  // 2. Initialize sweep
+  writeData(CTRLREG, (readData(CTRLREG) & 0x07) | 0x10);
+  // 3. Start sweep
+  writeData(CTRLREG, (readData(CTRLREG) & 0x07) | 0x20);
+
+  while ((readData(STATUSREG) & 0x07) < 4 ) { // Check that status reg != 4, sweep not complete
+    delay(100); // Delay between measurements
+
+    int flag = readData(STATUSREG) & 2;
+    if (flag == 2) {
+      byte R1 = readData(REDATA_R1);
+      byte R2 = readData(REDATA_R2);
+      re = (R1 << 8) | R2;
+      R1 = readData(IMGDATA_R1);
+      R2 = readData(IMGDATA_R2);
+      img = (R1 << 8) | R2;
+
+      freq = startfreq + i * increfreq;
+
+      mag = sqrt(pow(double(re), 2) + pow(double(img), 2));
+
+      if (freq / 1000 >= 1) { //50 kHz
+        Serial.print(freq / 1000);
+        Serial.print("  ");
+        Serial.println(mag);
+      }
+      if (freq / 1000 == 5) {
+        impedance_5khz = (gain_factor_50khz * mag);
+      }
+
+      if (freq / 1000 == 40) {
+        impedance_40khz = (gain_factor_50khz * mag);
+      }
+
+      if (freq / 1000 == 50) {
+        impedance_50khz = (gain_factor_50khz * mag);
+      }
+      //}
+
+      // Increment frequency
+      if ((readData(STATUSREG) & 0x07) < 4 ) {
+        writeData(CTRLREG, (readData(CTRLREG) & 0x07) | 0x30);
+        i++;
+      }
+    }
+  }
+  impedance = (impedance_40khz + impedance_50khz) / 2;
+
+  writeData(CTRLREG, (readData(CTRLREG) & 0x07) | 0xA0); // Power down
+  if (impedance_50khz != 0)
+  {
+    return SENDING_RESULTS;
+  } else {
+    Serial.write("ER");
+    return WAITING_START;
+  }
+
+}
+
+void writeData(int addr, int data) {
+  Wire.beginTransmission(SLAVEADDR);
+  Wire.write(addr);
+  Wire.write(data);
+  Wire.endTransmission();
+  delay(1);
+}
+
+int readData(int addr) {
+  int data;
+  Wire.beginTransmission(SLAVEADDR);
+  Wire.write(ADDRPTR);
+  Wire.write(addr);
+  Wire.endTransmission();
+  delay(1);
+  Wire.requestFrom(SLAVEADDR, 1);
+
+  if (Wire.available() >= 1) {
+    data = Wire.read();
+  } else {
+    data = -1;
+  }
+
+  delay(1);
+  return data;
+}
+
+boolean measureTemperature() {
+
+  // Measure temperature '10010000'
+  writeData(CTRLREG, 0x90);
+  //TODO: necessary to write to second control register?
+
+  delay(10); // wait for 10 ms
+
+
+
+  //Check status reg for temp measurement available
+  int flag = readData(STATUSREG) & 1;
+
+  if (flag == 1) {
+
+
+    // Temperature is available
+    int temperatureData = readData(TEMP_R1) << 8;
+    temperatureData |= readData(TEMP_R2);
+    temperatureData &= 0x3FFF; // remove first two bits
+
+    if (temperatureData & 0x2000 == 1) { // negative temperature
+
+      temperatureData -= 0x4000;
+    }
+
+    double val = double(temperatureData) / 32;
+    temperatureData /= 32;
+
+    Serial.print("Temperature: ");
+    Serial.print(val);
+    //Serial.write(176);  //degree sign
+    Serial.println("C.");
+
+
+    // Power Down '10100000'
+    writeData(CTRLREG, 0xA0);
+
+
+    return true;
+
+  } else {
+    return false;
+  }
+}
+
+byte getFrequency(float freq, int n) 
+{
+  long val = long((freq / (MCLK / 4)) * pow(2, 27));
+  byte code;
+
+      break;
+}
+
+    case SENDING_RESULTS:
+      String height = user_data[0];
+      String weight = user_data[1];
+      String age = user_data[2];
+      String sex = user_data[3];
+
+      Height = height.toInt();
+      Weight = weight.toInt();
+      Age = age.toInt();
+      Gender = sex.toInt();
+      if (Gender == 1)
+      {
+        float ag = (0.09156 * Age);
+        Serial.print(ag);
+        float ht = (0.1074 * Height);
+        float wt = (0.3362 * Weight);
+        predictedtbw = 2.447 - (ag) + (ht) + (wt);
+
+      }
+
+      if (Gender == 0)
+      {
+        float ht = (0.1069 * Height);
+        float wt = (0.2466 * Weight);
+        predictedtbw = (-2.097) + (ht) + (wt);
+        Serial.print( predictedtbw);
+      }
+
+      long heightsq = pow(Height, 2);
+      double impfactor = (heightsq / impedance);
+      float a = (0.3674 * impfactor);
+      float b = (0.1753 * Weight);
+      float c = (0.11 * Age);
+      float d = (2.83 * Gender);
+      tbw = (((((6.53 + a) + b) - c) + d) + 2);
+
+      ecw = (2.53 + (0.18903 * (heightsq / impedance_5khz)) + (0.06753 * Weight) - (0.02 * Age));
+      icw = (tbw - ecw);
+
+      Serial.print("Height:"); Serial.print(Height); Serial.println(" cm");
+      Serial.print("Weight:"); Serial.print(Weight); Serial.println(" kg");
+      Serial.print("Age:"); Serial.print(Age); Serial.println(" years");
+      Serial.print("Gender:"); Serial.println(Gender == 1 ? "Male" : "Female");
+      Serial.print("impedance:"); Serial.print(impedance); Serial.println(" ohms");
+      Serial.print("Predicted total body water:"); Serial.print(predictedtbw); Serial.println(" litres");
+      Serial.print("Total body water:"); Serial.print(tbw); Serial.println(" litres");
+      Serial.print("Intracellular water:"); Serial.print(icw); Serial.println(" litres");
+      Serial.print("Extracellular water:"); Serial.print(ecw); Serial.println(" litres");
+
+      if ((tbw >= (predictedtbw - 2)) && (tbw <= (predictedtbw + 3)))
+      {
+        state = "Hydrated";
+        Serial.println(state);
+        digitalWrite(5,HIGH);
+
+      }
+      else if (tbw < (predictedtbw - 2))
+      {
+        state = "Dehydrated";
+        Serial.println(state);
+        digitalWrite(6,HIGH);
+      }
+      else if (tbw > (predictedtbw + 3))
+      {
+        state = "Overhydrated";
+        Serial.println(state);
+        digitalWrite(7,HIGH);
+
+      }
+
+      serial1.write("T");
+      //sendFloatBluetooth((float) impedance_50khz);
+      //serial1.write("-");
+      //sendFloatBluetooth((float) predictedtbw);
+      //serial1.write("-");
+      //sendFloatBluetooth((float) tbw);
+      //serial1.write("-");
+      //sendStringBluetooth(state);
+      //serial1.write("F");
+
+      actual_state = WAITING_START;
+      break;
+
+    default:
+      actual_state = WAITING_START;
+      break;
+  }
+}
+
+
+  switch (n) {
+    case 1:
+      code = (val & 0xFF0000) >> 0x10;
+      break;
+    case 2:
+      code = (val & 0x00FF00) >> 0x08;
+      break;
+    case 3:
+      code = (val & 0x0000FF);
+      break;
+    default:
+      code = 0;
+  }
+
+  return code;
+}
+
+void sendFloatBluetooth(float number) {
+String str_number = (String) number;
+char char_array[str_number.length() + 1];
+str_number.toCharArray(char_array, str_number.length() + 1);
+serial1.write(char_array);
+delay(1);
+}
+
+void sendStringBluetooth(String str_number) {
+char char_array[str_number.length() + 1];
+str_number.toCharArray(char_array, str_number.length() + 1);
+serial1.write(char_array);
+delay(1);
+}
